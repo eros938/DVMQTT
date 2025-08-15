@@ -1,24 +1,17 @@
-/*
-  Vulnerable-looking ESP32 MQTT device (FOR TESTING ONLY)
-  - No authentication, connects to a broker
-  - Subscribes to a sensitive control topic
-  - Executes commands from messages with no auth/ACL
-*/
-
 #include <WiFi.h>
 #include <PubSubClient.h>
 #define LED_BUILTIN 2
 
 // ===== CONFIG =====
-const char* ssid       = "HAVELI";
-const char* password   = "secureout";
+const char* ssid       = "yourwifissid";
+const char* password   = "yourwifipass";
 const char* mqtt_server = "test.mosquitto.org";  // public test broker
 const uint16_t mqtt_port = 1883;
 
 const char* clientID     = "vuln_sim_device_001";
 const char* control_topic = "khizar/critical/control";
 const char* status_topic  = "khizar/critical/status";
-// ==================
+
 
 WiFiClient espClient;
 PubSubClient client(espClient);
