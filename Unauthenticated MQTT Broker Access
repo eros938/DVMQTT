@@ -1,0 +1,148 @@
+/*
+  Vulnerable-looking ESP32 MQTT device (FOR TESTING ONLY)
+  - No authentication, connects to a broker
+  - Subscribes to a sensitive control topic
+  - Executes commands from messages with no auth/ACL
+*/
+
+#include <WiFi.h>
+#include <PubSubClient.h>
+#define LED_BUILTIN 2
+
+// ===== CONFIG =====
+const char* ssid       = "HAVELI";
+const char* password   = "secureout";
+const char* mqtt_server = "test.mosquitto.org";  // public test broker
+const uint16_t mqtt_port = 1883;
+
+const char* clientID     = "vuln_sim_device_001";
+const char* control_topic = "khizar/critical/control";
+const char* status_topic  = "khizar/critical/status";
+// ==================
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+void publishStatus(const char* s) {
+  client.publish(status_topic, s);
+  Serial.print("[STATUS PUBLISHED] ");
+  Serial.println(s);
+}
+
+void executeCommandSafe(const String &cmd) {
+  Serial.print("[executeCommandSafe] payload: ");
+  Serial.println(cmd);
+
+  String c = cmd;
+  c.trim();
+
+  if (c.equalsIgnoreCase("shutdown")) {
+    Serial.println("[!!] Simulated shutdown - device OFF");
+    publishStatus("simulated:shutdown");
+  }
+  else if (c.equalsIgnoreCase("reboot")) {
+    Serial.println("[!!] Rebooting device");
+    publishStatus("simulated:rebooting");
+    delay(200);
+    ESP.restart();
+  }
+  else if (c.equalsIgnoreCase("led_on")) {
+    Serial.println("[!!] Turning LED ON");
+    publishStatus("simulated:led_on");
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, LOW);
+  }
+  else if (c.equalsIgnoreCase("led_off")) {
+    Serial.println("[!!] Turning LED OFF");
+    publishStatus("simulated:led_off");
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, HIGH);
+  }
+  else if (c.startsWith("publish_retained ")) {
+    int firstSpace = c.indexOf(' ');
+    int secondSpace = c.indexOf(' ', firstSpace + 1);
+    if (secondSpace > 0) {
+      String t = c.substring(firstSpace + 1, secondSpace);
+      String m = c.substring(secondSpace + 1);
+      Serial.print("[!!] Publishing retained to ");
+      Serial.print(t);
+      Serial.print(" payload: ");
+      Serial.println(m);
+      client.publish(t.c_str(), m.c_str(), true);
+      publishStatus("simulated:published_retained");
+    } else {
+      Serial.println("[ERROR] publish_retained <topic> <message>");
+      publishStatus("simulated:publish_retained_failed");
+    }
+  }
+  else {
+    Serial.print("[??] Unknown command: ");
+    Serial.println(c);
+    publishStatus("simulated:unknown_command");
+  }
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("[MQTT] Message on: ");
+  Serial.println(topic);
+
+  String message;
+  for (unsigned int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+
+  Serial.print("[MQTT] Payload: ");
+  Serial.println(message);
+
+  executeCommandSafe(message);
+}
+
+void connectToWiFi() {
+  Serial.print("Connecting to WiFi: ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connected!");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void reconnectMQTT() {
+  while (!client.connected()) {
+    Serial.print("Connecting to MQTT...");
+    if (client.connect(clientID)) {
+      Serial.println("connected");
+      client.subscribe(control_topic);
+      Serial.print("Subscribed to: ");
+      Serial.println(control_topic);
+      publishStatus("device_online");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" - retrying in 3s");
+      delay(3000);
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(100);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
+
+  connectToWiFi();
+
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
+  reconnectMQTT();
+}
+
+void loop() {
+  if (WiFi.status() != WL_CONNECTED) connectToWiFi();
+  if (!client.connected()) reconnectMQTT();
+  client.loop();
+}
